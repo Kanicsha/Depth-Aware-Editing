@@ -3,13 +3,15 @@ import numpy as np
 import cv2
 from PIL import Image
 
-import sys 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-sys.path.append("/mnt/data/rishubh/sachi/AnyDoorV2/")
-from src.grounded_sam.grounded_sam_demo1 import main as segment_object
+def _get_segment_object():
+    import sys
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    from src.grounded_sam.grounded_sam_demo1 import main as segment_object
+    return segment_object
 
 
 def sam_postprocess(src_img, tar_img, text_prompt, mpi_foreground):
+    segment_object = _get_segment_object()
     sam_json = segment_object(Image.fromarray(cv2.cvtColor(tar_img, cv2.COLOR_BGR2RGB)), None, text_prompt=text_prompt, output_dir="./sam_output_dir")
     sam_mask = np.array(sam_json[1]["mask"][0])[:,:,None]
     sam_mask = np.concatenate([sam_mask]*3, axis=2)
@@ -21,6 +23,7 @@ def sam_postprocess(src_img, tar_img, text_prompt, mpi_foreground):
 
 
 def sam_postprocess2(src_img, tar_img, tar_mpi_img, text_prompt, mpi_foreground):
+    segment_object = _get_segment_object()
     sam_json = segment_object(Image.fromarray(cv2.cvtColor(tar_img, cv2.COLOR_BGR2RGB)), None, text_prompt=text_prompt, output_dir="./sam_output_dir")
     sam_mask = np.array(sam_json[1]["mask"][0])[:,:,None]
     sam_mask = np.concatenate([sam_mask]*3, axis=2)
@@ -31,6 +34,7 @@ def sam_postprocess2(src_img, tar_img, tar_mpi_img, text_prompt, mpi_foreground)
     return final_image
 
 def get_sam_mask(tar_img, text_prompt, object_bbox=None):
+    segment_object = _get_segment_object()
     sam_json = segment_object(Image.fromarray(cv2.cvtColor(tar_img, cv2.COLOR_BGR2RGB)), None, text_prompt=text_prompt, obj_bbox=object_bbox,
                                output_dir="./sam_output_dir")
     if(len(sam_json) == 0 or len(sam_json) == 1):

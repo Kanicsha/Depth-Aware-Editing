@@ -83,7 +83,7 @@ class NullTextPipeline(StableDiffusionPipeline):
         image = np.array(image)
         image = (torch.from_numpy(image).float() / 127.5) - 1.0
         # convert image to torch.float16
-        image = image.to(dtype=torch.float16)
+        image = image.to(dtype=torch.float32)
         image = image.permute(2, 0, 1).unsqueeze(0).to(self.device)
         latents = self.vae.encode(image)["latent_dist"].mean
         latents = latents * 0.18215
@@ -219,7 +219,7 @@ class NullTextPipeline(StableDiffusionPipeline):
         latent = self.image2latent(image_path)
         ddim_latents = self.ddim_inversion_loop(latent, context)
         if os.path.exists(image_path + ".pt"):
-            uncond_embeddings = torch.load(image_path + ".pt")
+            uncond_embeddings = torch.load(image_path + ".pt", map_location="cpu")
         else:
             uncond_embeddings = self.null_optimization(ddim_latents, context, num_inner_steps, early_stop_epsilon)
             uncond_embeddings = torch.stack(uncond_embeddings, 0)

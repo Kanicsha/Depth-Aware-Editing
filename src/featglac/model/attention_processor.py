@@ -264,10 +264,11 @@ class Attention(nn.Module):
             else:
                 try:
                     # Make sure we can run the memory efficient attention
+                    _xdev = "cuda" if torch.cuda.is_available() else "cpu"
                     _ = xformers.ops.memory_efficient_attention(
-                        torch.randn((1, 2, 40), device="cuda"),
-                        torch.randn((1, 2, 40), device="cuda"),
-                        torch.randn((1, 2, 40), device="cuda"),
+                        torch.randn((1, 2, 40), device=_xdev),
+                        torch.randn((1, 2, 40), device=_xdev),
+                        torch.randn((1, 2, 40), device=_xdev),
                     )
                 except Exception as e:
                     raise e

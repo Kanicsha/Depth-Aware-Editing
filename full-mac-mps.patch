@@ -1,0 +1,637 @@
+diff --git a/cldm/cldm.py b/cldm/cldm.py
+index a626546..12fc082 100644
+--- a/cldm/cldm.py
++++ b/cldm/cldm.py
+@@ -461,13 +461,14 @@ class ControlLDM(LatentDiffusion):
+         return opt
+ 
+     def low_vram_shift(self, is_diffusing):
++        _dev = next(self.parameters()).device
+         if is_diffusing:
+-            self.model = self.model.cuda()
+-            self.control_model = self.control_model.cuda()
++            self.model = self.model.to(_dev)
++            self.control_model = self.control_model.to(_dev)
+             self.first_stage_model = self.first_stage_model.cpu()
+             self.cond_stage_model = self.cond_stage_model.cpu()
+         else:
+             self.model = self.model.cpu()
+             self.control_model = self.control_model.cpu()
+-            self.first_stage_model = self.first_stage_model.cuda()
+-            self.cond_stage_model = self.cond_stage_model.cuda()
++            self.first_stage_model = self.first_stage_model.to(_dev)
++            self.cond_stage_model = self.cond_stage_model.to(_dev)
+diff --git a/cldm/cldm_blended.py b/cldm/cldm_blended.py
+index e3a14ab..9320adc 100644
+--- a/cldm/cldm_blended.py
++++ b/cldm/cldm_blended.py
+@@ -430,13 +430,14 @@ class ControlLDM(LatentDiffusion):
+         return opt
+ 
+     def low_vram_shift(self, is_diffusing):
++        _dev = next(self.parameters()).device
+         if is_diffusing:
+-            self.model = self.model.cuda()
+-            self.control_model = self.control_model.cuda()
++            self.model = self.model.to(_dev)
++            self.control_model = self.control_model.to(_dev)
+             self.first_stage_model = self.first_stage_model.cpu()
+             self.cond_stage_model = self.cond_stage_model.cpu()
+         else:
+             self.model = self.model.cpu()
+             self.control_model = self.control_model.cpu()
+-            self.first_stage_model = self.first_stage_model.cuda()
+-            self.cond_stage_model = self.cond_stage_model.cuda()
++            self.first_stage_model = self.first_stage_model.to(_dev)
++            self.cond_stage_model = self.cond_stage_model.to(_dev)
+diff --git a/cldm/ddim_hacked.py b/cldm/ddim_hacked.py
+index 5520ab5..e51823f 100644
+--- a/cldm/ddim_hacked.py
++++ b/cldm/ddim_hacked.py
+@@ -16,8 +16,9 @@ class DDIMSampler(object):
+ 
+     def register_buffer(self, name, attr):
+         if type(attr) == torch.Tensor:
+-            if attr.device != torch.device("cuda"):
+-                attr = attr.to(torch.device("cuda"))
++            if attr.is_floating_point() and self.model.device.type == "mps":
++                attr = attr.to(torch.float32)
++            attr = attr.to(self.model.device)
+         setattr(self, name, attr)
+ 
+     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
+diff --git a/cldm/ddim_hacked_mpi_featguidance.py b/cldm/ddim_hacked_mpi_featguidance.py
+index d163dd4..69d5644 100644
+--- a/cldm/ddim_hacked_mpi_featguidance.py
++++ b/cldm/ddim_hacked_mpi_featguidance.py
+@@ -20,8 +20,9 @@ class DDIMSampler(object):
+ 
+     def register_buffer(self, name, attr):
+         if type(attr) == torch.Tensor:
+-            if attr.device != torch.device("cuda"):
+-                attr = attr.to(torch.device("cuda"))
++            if attr.is_floating_point() and self.model.device.type == "mps":
++                attr = attr.to(torch.float32)
++            attr = attr.to(self.model.device)
+         setattr(self, name, attr)
+ 
+     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
+diff --git a/download_weights.sh b/download_weights.sh
+index cd94fe6..db559e3 100644
+--- a/download_weights.sh
++++ b/download_weights.sh
+@@ -2,12 +2,11 @@
+ 
+ cd weights
+ # Downloading weights for depth anything model
+-wget https://huggingface.co/xiaol/tmp/resolve/main/depth_anything_metric_depth_indoor.pt
+-wget https://huggingface.co/spaces/LiheYoung/Depth-Anything/resolve/main/checkpoints/depth_anything_vitl14.pth
++curl -L -O https://huggingface.co/xiaol/tmp/resolve/main/depth_anything_metric_depth_indoor.pt
++curl -L -O https://huggingface.co/spaces/LiheYoung/Depth-Anything/resolve/main/checkpoints/depth_anything_vitl14.pth
+ 
+ # Downloading weights for Dinov2 backbone
+-wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitg14/dinov2_vitg14_pretrain.pth
++curl -L -O https://dl.fbaipublicfiles.com/dinov2/dinov2_vitg14/dinov2_vitg14_pretrain.pth
+ 
+ # Downloading anydoor weights
+-wget https://huggingface.co/spaces/xichenhku/AnyDoor/resolve/main/epoch%3D1-step%3D8687.ckpt
+-
++curl -L -O "https://huggingface.co/spaces/xichenhku/AnyDoor/resolve/main/epoch%3D1-step%3D8687.ckpt"
+diff --git a/gradio_demo_op.py b/gradio_demo_op.py
+index d09277e..5f7220f 100644
+--- a/gradio_demo_op.py
++++ b/gradio_demo_op.py
+@@ -35,7 +35,12 @@ from utils.mpi.null_text_inv import NullTextPipeline
+ from diffusers.schedulers import DDIMScheduler
+ 
+ # Initialize device and models
+-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
++if torch.cuda.is_available():
++    device = torch.device("cuda")
++elif torch.backends.mps.is_available():
++    device = torch.device("mps")
++else:
++    device = torch.device("cpu")
+ 
+ # Initialize Diffusion Handles
+ diff_handles = FeatureGuidance(conf=None)
+@@ -52,8 +57,8 @@ model_ckpt = config.pretrained_model
+ model_config = config.config_file
+ 
+ model = create_model(model_config).cpu()
+-model.load_state_dict(load_state_dict(model_ckpt, location='cuda'))
+-model = model.cuda()
++model.load_state_dict(load_state_dict(model_ckpt, location=str(device)))
++model = model.to(device)
+ ddim_sampler = DDIMSampler(model)
+ 
+ def aug_data_mask(image, mask):
+@@ -270,17 +275,17 @@ def gradio_infer(background_image, reference_image, depth_value, image_dict, inv
+     # Resize MPI masks for model input
+     mpi_foreground_alpha = cv2.resize(mpi_foreground_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
+     mpi_background_alpha = cv2.resize(mpi_background_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
+-    mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
+-    mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
+-    
++    mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
++    mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
++
+     # Prepare tensors for diffusion handles
+-    ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
+-    depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to("cuda")
+-    
++    ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
++    depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to(device)
++
+     # Load or create null text embeddings
+     if os.path.exists(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt") and not do_null_text_again:
+-        null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to("cuda")
+-        ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to("cuda")
++        null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to(device)
++        ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to(device)
+         init_noise = ddim_latents[-1].requires_grad_(True)
+     else:
+         null_text_emb, ddim_latents = diff_handles.invert_input_image(ten_img3, depth_fore, prompt=inv_prompt)
+diff --git a/inference_scene_composition.py b/inference_scene_composition.py
+index 1654b96..c5f7d4f 100644
+--- a/inference_scene_composition.py
++++ b/inference_scene_composition.py
+@@ -18,7 +18,12 @@ from src.featglac.get_depth import get_depth_map
+ from transformers import pipeline
+ 
+ config_path = "./src/featglac/config/default_sc.yaml"
+-device = torch.device("cuda")
++if torch.cuda.is_available():
++    device = torch.device("cuda")
++elif torch.backends.mps.is_available():
++    device = torch.device("mps")
++else:
++    device = torch.device("cpu")
+ diff_handles_config = OmegaConf.load(config_path) if config_path is not None else None
+ diff_handles = FeatureGuidance(conf=diff_handles_config)
+ diff_handles.to(device)
+@@ -72,17 +77,17 @@ depth_control = depth_fore * fg_mask[:,:,0] + depth_back * (1 - fg_mask[:,:,0])
+ depth_control_img = depth_control.copy()
+ depth_control_col = colorise_depth(depth_control)
+ cv2.imwrite("./{}/{}_depth_control.jpg".format(save_dir,input_img_name), depth_control_col)
+-depth_control = torch.from_numpy(depth_control).unsqueeze(0).unsqueeze(0).to(torch.float32).to("cuda")
++depth_control = torch.from_numpy(depth_control).unsqueeze(0).unsqueeze(0).to(torch.float32).to(device)
+ 
+ image_mpi = np.array(bg_img) * (1 - fg_mask) + np.array(fg_img) * fg_mask
+ cv2.imwrite("./{}/{}_image_mpi.jpg".format(save_dir,input_img_name), cv2.cvtColor(image_mpi, cv2.COLOR_RGB2BGR))
+ 
+-depth_back = torch.tensor(depth_back).unsqueeze(0).unsqueeze(0).to("cuda")
+-ten_img2 = torch.tensor(np.array(bg_img)).permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
++depth_back = torch.tensor(depth_back).unsqueeze(0).unsqueeze(0).to(device)
++ten_img2 = torch.tensor(np.array(bg_img)).permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
+ 
+ if(os.path.exists(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_null_text.pt")):
+-    null_text_emb = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_null_text.pt").to("cuda")
+-    init_noise = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_init_noise.pt").to("cuda")
++    null_text_emb = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_null_text.pt").to(device)
++    init_noise = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_init_noise.pt").to(device)
+ else:
+     null_text_emb, init_noise = diff_handles.invert_input_image(ten_img2, depth_back, inv_prompt_bg)
+     init_noise = init_noise[-1]
+@@ -101,11 +106,11 @@ with torch.no_grad():
+     latent_image = (latent_image * 255).astype(np.uint8)
+     cv2.imwrite("./{}/{}_recon_bg.jpg".format(save_dir,input_img_name), cv2.cvtColor(latent_image, cv2.COLOR_RGB2BGR))
+ 
+-depth_fore = torch.tensor(depth_fore).unsqueeze(0).unsqueeze(0).to("cuda")
+-ten_img3 = torch.tensor(np.array(fg_img)).permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
++depth_fore = torch.tensor(depth_fore).unsqueeze(0).unsqueeze(0).to(device)
++ten_img3 = torch.tensor(np.array(fg_img)).permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
+ if(os.path.exists(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_null_text.pt")):
+-    null_text_emb = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_null_text.pt").to("cuda")
+-    init_noise = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_init_noise.pt").to("cuda")
++    null_text_emb = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_null_text.pt").to(device)
++    init_noise = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_init_noise.pt").to(device)
+ else:
+     null_text_emb, init_noise = diff_handles.invert_input_image(ten_img3, depth_fore, inv_prompt_fg)
+     init_noise = init_noise[-1]
+@@ -115,7 +120,7 @@ else:
+ null_text_emb_fg, init_noise_fg, activations_fore, latent_image = diff_handles.generate_input_image(
+                 depth=depth_fore, prompt=inv_prompt_fg, null_text_emb=null_text_emb, init_noise=init_noise)
+ 
+-down_sampled_mask = torch.nn.functional.interpolate(torch.tensor(fg_mask[:,:,0]).unsqueeze(0).unsqueeze(0).to(torch.float32).to("cuda"),
++down_sampled_mask = torch.nn.functional.interpolate(torch.tensor(fg_mask[:,:,0]).unsqueeze(0).unsqueeze(0).to(torch.float32).to(device),
+                                                      size=(64, 64), mode='nearest')
+ 
+ # save image reconstructed from inversion
+diff --git a/ldm/models/diffusion/ddim.py b/ldm/models/diffusion/ddim.py
+index 27ead0e..1ca6254 100644
+--- a/ldm/models/diffusion/ddim.py
++++ b/ldm/models/diffusion/ddim.py
+@@ -16,8 +16,9 @@ class DDIMSampler(object):
+ 
+     def register_buffer(self, name, attr):
+         if type(attr) == torch.Tensor:
+-            if attr.device != torch.device("cuda"):
+-                attr = attr.to(torch.device("cuda"))
++            if attr.is_floating_point() and self.model.device.type == "mps":
++                attr = attr.to(torch.float32)
++            attr = attr.to(self.model.device)
+         setattr(self, name, attr)
+ 
+     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
+diff --git a/ldm/models/diffusion/dpm_solver/sampler.py b/ldm/models/diffusion/dpm_solver/sampler.py
+index 7d137b8..df6b006 100644
+--- a/ldm/models/diffusion/dpm_solver/sampler.py
++++ b/ldm/models/diffusion/dpm_solver/sampler.py
+@@ -19,8 +19,9 @@ class DPMSolverSampler(object):
+ 
+     def register_buffer(self, name, attr):
+         if type(attr) == torch.Tensor:
+-            if attr.device != torch.device("cuda"):
+-                attr = attr.to(torch.device("cuda"))
++            if attr.is_floating_point() and self.model.device.type == "mps":
++                attr = attr.to(torch.float32)
++            attr = attr.to(self.model.device)
+         setattr(self, name, attr)
+ 
+     @torch.no_grad()
+diff --git a/ldm/models/diffusion/plms.py b/ldm/models/diffusion/plms.py
+index 7002a36..4f4c781 100644
+--- a/ldm/models/diffusion/plms.py
++++ b/ldm/models/diffusion/plms.py
+@@ -18,8 +18,9 @@ class PLMSSampler(object):
+ 
+     def register_buffer(self, name, attr):
+         if type(attr) == torch.Tensor:
+-            if attr.device != torch.device("cuda"):
+-                attr = attr.to(torch.device("cuda"))
++            if attr.is_floating_point() and self.model.device.type == "mps":
++                attr = attr.to(torch.float32)
++            attr = attr.to(self.model.device)
+         setattr(self, name, attr)
+ 
+     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
+diff --git a/ldm/modules/diffusionmodules/util.py b/ldm/modules/diffusionmodules/util.py
+index 637363d..91fd2b8 100644
+--- a/ldm/modules/diffusionmodules/util.py
++++ b/ldm/modules/diffusionmodules/util.py
+@@ -21,12 +21,12 @@ from ldm.util import instantiate_from_config
+ def make_beta_schedule(schedule, n_timestep, linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):
+     if schedule == "linear":
+         betas = (
+-                torch.linspace(linear_start ** 0.5, linear_end ** 0.5, n_timestep, dtype=torch.float64) ** 2
++                torch.linspace(linear_start ** 0.5, linear_end ** 0.5, n_timestep, dtype=torch.float32) ** 2
+         )
+ 
+     elif schedule == "cosine":
+         timesteps = (
+-                torch.arange(n_timestep + 1, dtype=torch.float64) / n_timestep + cosine_s
++                torch.arange(n_timestep + 1, dtype=torch.float32) / n_timestep + cosine_s
+         )
+         alphas = timesteps / (1 + cosine_s) * np.pi / 2
+         alphas = torch.cos(alphas).pow(2)
+@@ -35,9 +35,9 @@ def make_beta_schedule(schedule, n_timestep, linear_start=1e-4, linear_end=2e-2,
+         betas = np.clip(betas, a_min=0, a_max=0.999)
+ 
+     elif schedule == "sqrt_linear":
+-        betas = torch.linspace(linear_start, linear_end, n_timestep, dtype=torch.float64)
++        betas = torch.linspace(linear_start, linear_end, n_timestep, dtype=torch.float32)
+     elif schedule == "sqrt":
+-        betas = torch.linspace(linear_start, linear_end, n_timestep, dtype=torch.float64) ** 0.5
++        betas = torch.linspace(linear_start, linear_end, n_timestep, dtype=torch.float32) ** 0.5
+     else:
+         raise ValueError(f"schedule '{schedule}' unknown.")
+     return betas.numpy()
+diff --git a/ldm/modules/encoders/modules.py b/ldm/modules/encoders/modules.py
+index 26f7d4d..1ca5665 100644
+--- a/ldm/modules/encoders/modules.py
++++ b/ldm/modules/encoders/modules.py
+@@ -1,5 +1,13 @@
+ import torch
+ import torch.nn as nn
++
++def _default_device():
++    if torch.cuda.is_available():
++        return "cuda"
++    elif torch.backends.mps.is_available():
++        return "mps"
++    return "cpu"
++
+ import torch.nn.functional as F
+ from torch.utils.checkpoint import checkpoint
+ from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextModel
+@@ -61,7 +69,8 @@ class ClassEmbedder(nn.Module):
+         c = self.embedding(c)
+         return c
+ 
+-    def get_unconditional_conditioning(self, bs, device="cuda"):
++    def get_unconditional_conditioning(self, bs, device=None):
++        if device is None: device = _default_device()
+         uc_class = self.n_classes - 1  # 1000 classes --> 0 ... 999, one extra class for ucg (class 1000)
+         uc = torch.ones((bs,), device=device) * uc_class
+         uc = {self.key: uc}
+@@ -76,8 +85,9 @@ def disabled_train(self, mode=True):
+ 
+ class FrozenT5Embedder(AbstractEncoder):
+     """Uses the T5 transformer encoder for text"""
+-    def __init__(self, version="google/t5-v1_1-large", device="cuda", max_length=77, freeze=True):  # others are google/t5-v1_1-xl and google/t5-v1_1-xxl
++    def __init__(self, version="google/t5-v1_1-large", device=None, max_length=77, freeze=True):  # others are google/t5-v1_1-xl and google/t5-v1_1-xxl
+         super().__init__()
++        if device is None: device = _default_device()
+         self.tokenizer = T5Tokenizer.from_pretrained(version)
+         self.transformer = T5EncoderModel.from_pretrained(version)
+         self.device = device
+@@ -111,9 +121,10 @@ class FrozenCLIPEmbedder(AbstractEncoder):
+         "pooled",
+         "hidden"
+     ]
+-    def __init__(self, version="openai/clip-vit-large-patch14", device="cuda", max_length=77,
++    def __init__(self, version="openai/clip-vit-large-patch14", device=None, max_length=77,
+                  freeze=True, layer="last", layer_idx=None):  # clip-vit-base-patch32
+         super().__init__()
++        if device is None: device = _default_device()
+         assert layer in self.LAYERS
+         self.tokenizer = CLIPTokenizer.from_pretrained(version)
+         self.transformer = CLIPTextModel.from_pretrained(version)
+@@ -159,9 +170,10 @@ class FrozenOpenCLIPEmbedder(AbstractEncoder):
+         "last",
+         "penultimate"
+     ]
+-    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device="cuda", max_length=77,
++    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device=None, max_length=77,
+                  freeze=True, layer="last"):
+         super().__init__()
++        if device is None: device = _default_device()
+         assert layer in self.LAYERS
+         model, _, _ = open_clip.create_model_and_transforms(arch, device=torch.device('cpu'), pretrained=version)
+         del model.visual
+@@ -214,9 +226,10 @@ class FrozenOpenCLIPEmbedder(AbstractEncoder):
+ 
+ 
+ class FrozenCLIPT5Encoder(AbstractEncoder):
+-    def __init__(self, clip_version="openai/clip-vit-large-patch14", t5_version="google/t5-v1_1-xl", device="cuda",
++    def __init__(self, clip_version="openai/clip-vit-large-patch14", t5_version="google/t5-v1_1-xl", device=None,
+                  clip_max_length=77, t5_max_length=77):
+         super().__init__()
++        if device is None: device = _default_device()
+         self.clip_encoder = FrozenCLIPEmbedder(clip_version, device, max_length=clip_max_length)
+         self.t5_encoder = FrozenT5Embedder(t5_version, device, max_length=t5_max_length)
+         print(f"{self.clip_encoder.__class__.__name__} has {count_params(self.clip_encoder)*1.e-6:.2f} M parameters, "
+@@ -236,8 +249,9 @@ class FrozenOpenCLIPImageEncoder(AbstractEncoder):
+     Uses the OpenCLIP transformer encoder for image
+     """
+ 
+-    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device="cuda", freeze=True):
++    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device=None, freeze=True):
+         super().__init__()
++        if device is None: device = _default_device()
+         model, _, preprocess= open_clip.create_model_and_transforms(arch, device=torch.device('cpu'), pretrained=version)
+         del model.transformer
+         self.model = model
+@@ -280,10 +294,17 @@ class FrozenDinoV2Encoder(AbstractEncoder):
+     """
+     Uses the DINOv2 encoder for image
+     """
+-    def __init__(self, device="cuda", freeze=True):
++    def __init__(self, device=None, freeze=True):
+         super().__init__()
+-        dinov2 = hubconf.dinov2_vitg14() 
+-        state_dict = torch.load(DINOv2_weight_path)
++        if device is None:
++            if torch.cuda.is_available():
++                device = "cuda"
++            elif torch.backends.mps.is_available():
++                device = "mps"
++            else:
++                device = "cpu"
++        dinov2 = hubconf.dinov2_vitg14()
++        state_dict = torch.load(DINOv2_weight_path, map_location=device)
+         dinov2.load_state_dict(state_dict, strict=False)
+         self.model = dinov2.to(device)
+         self.device = device
+diff --git a/run_inference_object_placement.py b/run_inference_object_placement.py
+index 94df72c..1e8271f 100644
+--- a/run_inference_object_placement.py
++++ b/run_inference_object_placement.py
+@@ -24,7 +24,12 @@ sys.path.append(".")
+ from src.featglac import FeatureGuidance
+ from diffusers.image_processor import VaeImageProcessor
+ 
+-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
++if torch.cuda.is_available():
++    device = torch.device("cuda")
++elif torch.backends.mps.is_available():
++    device = torch.device("mps")
++else:
++    device = torch.device("cpu")
+ 
+ def load_models():
+     diff_handles = FeatureGuidance(conf=None)
+@@ -40,8 +45,8 @@ def load_models():
+     model_config = config.config_file
+ 
+     model = create_model(model_config ).cpu()
+-    model.load_state_dict(load_state_dict(model_ckpt, location='cuda'))
+-    model = model.cuda()
++    model.load_state_dict(load_state_dict(model_ckpt, location=str(device)))
++    model = model.to(device)
+     ddim_sampler = DDIMSampler(model)
+ 
+     return diff_handles, model, ddim_sampler, save_memory
+@@ -223,12 +228,12 @@ def inference_single_image(ref_image, ref_mask, tar_image, tar_mask, mpi_data_di
+     hint = item['hint']
+     num_samples = 1
+ 
+-    control = torch.from_numpy(hint.copy()).float().cuda() 
++    control = torch.from_numpy(hint.copy()).float().to(device)
+     control = torch.stack([control for _ in range(num_samples)], dim=0)
+     control = einops.rearrange(control, 'b h w c -> b c h w').clone()
+ 
+ 
+-    clip_input = torch.from_numpy(ref.copy()).float().cuda() 
++    clip_input = torch.from_numpy(ref.copy()).float().to(device)
+     clip_input = torch.stack([clip_input for _ in range(num_samples)], dim=0)
+     clip_input = einops.rearrange(clip_input, 'b h w c -> b c h w').clone()
+ 
+@@ -438,16 +443,16 @@ if __name__ == '__main__':
+         mpi_foreground_alpha = cv2.resize(mpi_foreground_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
+ 
+         mpi_background_alpha = cv2.resize(mpi_background_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
+-        mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
+-        mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
++        mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
++        mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
+ 
+         # Do null text inversion
+-        ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
+-        depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to("cuda")
++        ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
++        depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to(device)
+ 
+         if(os.path.exists(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt") and not do_null_text_again):
+-            null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to("cuda")
+-            ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to("cuda")
++            null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to(device)
++            ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to(device)
+             init_noise = ddim_latents[-1]
+         else:
+             null_text_emb, ddim_latents = diff_handles.invert_input_image(ten_img3, depth_fore, prompt=inv_prompt)
+diff --git a/src/featglac/guided_stable_diffuser.py b/src/featglac/guided_stable_diffuser.py
+index 659535f..9688d25 100644
+--- a/src/featglac/guided_stable_diffuser.py
++++ b/src/featglac/guided_stable_diffuser.py
+@@ -26,7 +26,7 @@ class GuidedStableDiffuser(GuidedDiffuser):
+         if self.conf.use_depth:
+             model_name = "stabilityai/stable-diffusion-2-depth"
+         else:       
+-            model_name = "stabilityai/stable-diffusion-2-1-base"
++            model_name = "Manojb/stable-diffusion-2-1-base"
+ 
+         self.scheduler = DDIMScheduler(
+             beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False)
+diff --git a/src/featglac/model/attention_processor.py b/src/featglac/model/attention_processor.py
+index 68b8ba1..f7f177e 100644
+--- a/src/featglac/model/attention_processor.py
++++ b/src/featglac/model/attention_processor.py
+@@ -264,10 +264,11 @@ class Attention(nn.Module):
+             else:
+                 try:
+                     # Make sure we can run the memory efficient attention
++                    _xdev = "cuda" if torch.cuda.is_available() else "cpu"
+                     _ = xformers.ops.memory_efficient_attention(
+-                        torch.randn((1, 2, 40), device="cuda"),
+-                        torch.randn((1, 2, 40), device="cuda"),
+-                        torch.randn((1, 2, 40), device="cuda"),
++                        torch.randn((1, 2, 40), device=_xdev),
++                        torch.randn((1, 2, 40), device=_xdev),
++                        torch.randn((1, 2, 40), device=_xdev),
+                     )
+                 except Exception as e:
+                     raise e
+diff --git a/src/featglac/model/transformer_2d.py b/src/featglac/model/transformer_2d.py
+index 2042ed2..025b88c 100644
+--- a/src/featglac/model/transformer_2d.py
++++ b/src/featglac/model/transformer_2d.py
+@@ -409,7 +409,7 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
+             logits = logits.permute(0, 2, 1)
+ 
+             # log(p(x_0))
+-            output = F.log_softmax(logits.double(), dim=1).float()
++            output = F.log_softmax(logits.float(), dim=1)
+ 
+         if self.is_input_patches:
+             if self.config.norm_type != "ada_norm_single":
+diff --git a/utils/mpi/mpi.py b/utils/mpi/mpi.py
+index 911a3ec..2239158 100644
+--- a/utils/mpi/mpi.py
++++ b/utils/mpi/mpi.py
+@@ -45,13 +45,14 @@ def render_scene_from_mpi_torch(mpi_rgbs, mpi_alphas):
+     n_planes = len(mpi_alphas)
+ 
+     # Creating a list of accumulated product values - prod(1-alpha)_i=1->i=D
+-    cum_alpha_ar = [torch.ones(mpi_alphas[0].shape).cuda()] # The deepest layer or mpi, having all the values to be 1. 
++    _dev = mpi_alphas[0].device
++    cum_alpha_ar = [torch.ones(mpi_alphas[0].shape).to(_dev)]
+     for idx in range(0,n_planes):
+-        cum_alpha = cum_alpha_ar[-1]*(1-mpi_alphas[n_planes-1-idx]) 
+-        cum_alpha_ar.append(cum_alpha) 
++        cum_alpha = cum_alpha_ar[-1]*(1-mpi_alphas[n_planes-1-idx])
++        cum_alpha_ar.append(cum_alpha)
+ 
+-    # To accumulate the pixel values in the combined image 
+-    combined_img = torch.zeros(mpi_rgbs[0].shape).cuda()
++    # To accumulate the pixel values in the combined image
++    combined_img = torch.zeros(mpi_rgbs[0].shape).to(_dev)
+     for idx in range(0, n_planes):
+         rgb = mpi_rgbs[idx]
+         alpha = mpi_alphas[idx] 
+diff --git a/utils/mpi/null_text_inv.py b/utils/mpi/null_text_inv.py
+index abfea56..da3c12e 100644
+--- a/utils/mpi/null_text_inv.py
++++ b/utils/mpi/null_text_inv.py
+@@ -83,7 +83,7 @@ class NullTextPipeline(StableDiffusionPipeline):
+         image = np.array(image)
+         image = (torch.from_numpy(image).float() / 127.5) - 1.0
+         # convert image to torch.float16
+-        image = image.to(dtype=torch.float16)
++        image = image.to(dtype=torch.float32)
+         image = image.permute(2, 0, 1).unsqueeze(0).to(self.device)
+         latents = self.vae.encode(image)["latent_dist"].mean
+         latents = latents * 0.18215
+@@ -219,7 +219,7 @@ class NullTextPipeline(StableDiffusionPipeline):
+         latent = self.image2latent(image_path)
+         ddim_latents = self.ddim_inversion_loop(latent, context)
+         if os.path.exists(image_path + ".pt"):
+-            uncond_embeddings = torch.load(image_path + ".pt")
++            uncond_embeddings = torch.load(image_path + ".pt", map_location="cpu")
+         else:
+             uncond_embeddings = self.null_optimization(ddim_latents, context, num_inner_steps, early_stop_epsilon)
+             uncond_embeddings = torch.stack(uncond_embeddings, 0)
+diff --git a/utils/mpi/postprocess.py b/utils/mpi/postprocess.py
+index 5e0c3fe..09f14de 100644
+--- a/utils/mpi/postprocess.py
++++ b/utils/mpi/postprocess.py
+@@ -3,13 +3,15 @@ import numpy as np
+ import cv2
+ from PIL import Image
+ 
+-import sys 
+-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+-sys.path.append("/mnt/data/rishubh/sachi/AnyDoorV2/")
+-from src.grounded_sam.grounded_sam_demo1 import main as segment_object
++def _get_segment_object():
++    import sys
++    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
++    from src.grounded_sam.grounded_sam_demo1 import main as segment_object
++    return segment_object
+ 
+ 
+ def sam_postprocess(src_img, tar_img, text_prompt, mpi_foreground):
++    segment_object = _get_segment_object()
+     sam_json = segment_object(Image.fromarray(cv2.cvtColor(tar_img, cv2.COLOR_BGR2RGB)), None, text_prompt=text_prompt, output_dir="./sam_output_dir")
+     sam_mask = np.array(sam_json[1]["mask"][0])[:,:,None]
+     sam_mask = np.concatenate([sam_mask]*3, axis=2)
+@@ -21,6 +23,7 @@ def sam_postprocess(src_img, tar_img, text_prompt, mpi_foreground):
+ 
+ 
+ def sam_postprocess2(src_img, tar_img, tar_mpi_img, text_prompt, mpi_foreground):
++    segment_object = _get_segment_object()
+     sam_json = segment_object(Image.fromarray(cv2.cvtColor(tar_img, cv2.COLOR_BGR2RGB)), None, text_prompt=text_prompt, output_dir="./sam_output_dir")
+     sam_mask = np.array(sam_json[1]["mask"][0])[:,:,None]
+     sam_mask = np.concatenate([sam_mask]*3, axis=2)
+@@ -31,6 +34,7 @@ def sam_postprocess2(src_img, tar_img, tar_mpi_img, text_prompt, mpi_foreground)
+     return final_image
+ 
+ def get_sam_mask(tar_img, text_prompt, object_bbox=None):
++    segment_object = _get_segment_object()
+     sam_json = segment_object(Image.fromarray(cv2.cvtColor(tar_img, cv2.COLOR_BGR2RGB)), None, text_prompt=text_prompt, obj_bbox=object_bbox,
+                                output_dir="./sam_output_dir")
+     if(len(sam_json) == 0 or len(sam_json) == 1):
+diff --git a/utils/mpi/preprocess.py b/utils/mpi/preprocess.py
+index 3435754..b1f296e 100644
+--- a/utils/mpi/preprocess.py
++++ b/utils/mpi/preprocess.py
+@@ -8,9 +8,17 @@ import sys
+ sys.path.append(".")
+ from utils.mpi.get_depth import get_depth_map
+ 
+-depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf")
++if torch.cuda.is_available():
++    _device = 0
++elif torch.backends.mps.is_available():
++    _device = "mps"
++else:
++    _device = "cpu"
+ 
+-sam_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device=0)
++depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf", device="cpu")
++
++sam_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device="cpu",
++                     torch_dtype=torch.float32)
+ 
+ def get_ddim_inverted_latents(nt_pipeline, image, prompt, num_inference_steps=50):
+     latent = nt_pipeline.image2latent(image)
+@@ -33,6 +41,8 @@ def get_depth_and_sam_mask(image, is_relative_depth=True):
+     else:
+         actual_depth, visualise_depth = get_depth_map(image)
+         depth = (actual_depth, visualise_depth)
++    # ensure image is a plain PIL RGB image (no MPS tensors attached)
++    image = Image.fromarray(np.array(image).astype(np.uint8))
+     outputs = sam_model(image, points_per_batch=64)
+     masks = outputs["masks"]
+     final_mask = torch.zeros_like(torch.tensor(masks[0]))

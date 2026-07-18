@@ -24,7 +24,12 @@ sys.path.append(".")
 from src.featglac import FeatureGuidance
 from diffusers.image_processor import VaeImageProcessor
 
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 
 def load_models():
     diff_handles = FeatureGuidance(conf=None)
@@ -40,8 +45,8 @@ def load_models():
     model_config = config.config_file
 
     model = create_model(model_config ).cpu()
-    model.load_state_dict(load_state_dict(model_ckpt, location='cuda'))
-    model = model.cuda()
+    model.load_state_dict(load_state_dict(model_ckpt, location=str(device)))
+    model = model.to(device)
     ddim_sampler = DDIMSampler(model)
 
     return diff_handles, model, ddim_sampler, save_memory
@@ -223,12 +228,12 @@ def inference_single_image(ref_image, ref_mask, tar_image, tar_mask, mpi_data_di
     hint = item['hint']
     num_samples = 1
 
-    control = torch.from_numpy(hint.copy()).float().cuda() 
+    control = torch.from_numpy(hint.copy()).float().to(device)
     control = torch.stack([control for _ in range(num_samples)], dim=0)
     control = einops.rearrange(control, 'b h w c -> b c h w').clone()
 
 
-    clip_input = torch.from_numpy(ref.copy()).float().cuda() 
+    clip_input = torch.from_numpy(ref.copy()).float().to(device)
     clip_input = torch.stack([clip_input for _ in range(num_samples)], dim=0)
     clip_input = einops.rearrange(clip_input, 'b h w c -> b c h w').clone()
 
@@ -438,16 +443,16 @@ if __name__ == '__main__':
         mpi_foreground_alpha = cv2.resize(mpi_foreground_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
 
         mpi_background_alpha = cv2.resize(mpi_background_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
-        mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
-        mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
+        mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
+        mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
 
         # Do null text inversion
-        ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
-        depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to("cuda")
+        ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
+        depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to(device)
 
         if(os.path.exists(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt") and not do_null_text_again):
-            null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to("cuda")
-            ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to("cuda")
+            null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to(device)
+            ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to(device)
             init_noise = ddim_latents[-1]
         else:
             null_text_emb, ddim_latents = diff_handles.invert_input_image(ten_img3, depth_fore, prompt=inv_prompt)

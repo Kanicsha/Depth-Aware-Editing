@@ -409,7 +409,7 @@ class Transformer2DModel(ModelMixin, ConfigMixin):
             logits = logits.permute(0, 2, 1)
 
             # log(p(x_0))
-            output = F.log_softmax(logits.double(), dim=1).float()
+            output = F.log_softmax(logits.float(), dim=1)
 
         if self.is_input_patches:
             if self.config.norm_type != "ada_norm_single":

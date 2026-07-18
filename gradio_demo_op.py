@@ -35,7 +35,12 @@ from utils.mpi.null_text_inv import NullTextPipeline
 from diffusers.schedulers import DDIMScheduler
 
 # Initialize device and models
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 
 # Initialize Diffusion Handles
 diff_handles = FeatureGuidance(conf=None)
@@ -52,8 +57,8 @@ model_ckpt = config.pretrained_model
 model_config = config.config_file
 
 model = create_model(model_config).cpu()
-model.load_state_dict(load_state_dict(model_ckpt, location='cuda'))
-model = model.cuda()
+model.load_state_dict(load_state_dict(model_ckpt, location=str(device)))
+model = model.to(device)
 ddim_sampler = DDIMSampler(model)
 
 def aug_data_mask(image, mask):
@@ -197,6 +202,7 @@ def gradio_infer(background_image, reference_image, depth_value, image_dict, inv
     DConf = OmegaConf.load('./configs/datasets.yaml')
     save_dir = './results/object_placement'
     null_text_emb_path = "./examples/Gradio/null_embed"
+    os.makedirs(null_text_emb_path, exist_ok=True)
     image_name = "gradio_inference"
     
     # MPI settings
@@ -270,17 +276,17 @@ def gradio_infer(background_image, reference_image, depth_value, image_dict, inv
     # Resize MPI masks for model input
     mpi_foreground_alpha = cv2.resize(mpi_foreground_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
     mpi_background_alpha = cv2.resize(mpi_background_alpha, (64, 64), interpolation=cv2.INTER_NEAREST)
-    mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
-    mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to("cuda").unsqueeze(0).unsqueeze(0)
-    
+    mpi_foreground_alpha = torch.tensor(mpi_foreground_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
+    mpi_background_alpha = torch.tensor(mpi_background_alpha, dtype=torch.float16).to(device).unsqueeze(0).unsqueeze(0)
+
     # Prepare tensors for diffusion handles
-    ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
-    depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to("cuda")
-    
+    ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
+    depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to(device)
+
     # Load or create null text embeddings
     if os.path.exists(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt") and not do_null_text_again:
-        null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to("cuda")
-        ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to("cuda")
+        null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to(device)
+        ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to(device)
         init_noise = ddim_latents[-1].requires_grad_(True)
     else:
         null_text_emb, ddim_latents = diff_handles.invert_input_image(ten_img3, depth_fore, prompt=inv_prompt)

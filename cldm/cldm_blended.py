@@ -430,13 +430,14 @@ class ControlLDM(LatentDiffusion):
         return opt
 
     def low_vram_shift(self, is_diffusing):
+        _dev = next(self.parameters()).device
         if is_diffusing:
-            self.model = self.model.cuda()
-            self.control_model = self.control_model.cuda()
+            self.model = self.model.to(_dev)
+            self.control_model = self.control_model.to(_dev)
             self.first_stage_model = self.first_stage_model.cpu()
             self.cond_stage_model = self.cond_stage_model.cpu()
         else:
             self.model = self.model.cpu()
             self.control_model = self.control_model.cpu()
-            self.first_stage_model = self.first_stage_model.cuda()
-            self.cond_stage_model = self.cond_stage_model.cuda()
+            self.first_stage_model = self.first_stage_model.to(_dev)
+            self.cond_stage_model = self.cond_stage_model.to(_dev)

@@ -1,5 +1,13 @@
 import torch
 import torch.nn as nn
+
+def _default_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    elif torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextModel
@@ -61,7 +69,8 @@ class ClassEmbedder(nn.Module):
         c = self.embedding(c)
         return c
 
-    def get_unconditional_conditioning(self, bs, device="cuda"):
+    def get_unconditional_conditioning(self, bs, device=None):
+        if device is None: device = _default_device()
         uc_class = self.n_classes - 1  # 1000 classes --> 0 ... 999, one extra class for ucg (class 1000)
         uc = torch.ones((bs,), device=device) * uc_class
         uc = {self.key: uc}
@@ -76,8 +85,9 @@ def disabled_train(self, mode=True):
 
 class FrozenT5Embedder(AbstractEncoder):
     """Uses the T5 transformer encoder for text"""
-    def __init__(self, version="google/t5-v1_1-large", device="cuda", max_length=77, freeze=True):  # others are google/t5-v1_1-xl and google/t5-v1_1-xxl
+    def __init__(self, version="google/t5-v1_1-large", device=None, max_length=77, freeze=True):  # others are google/t5-v1_1-xl and google/t5-v1_1-xxl
         super().__init__()
+        if device is None: device = _default_device()
         self.tokenizer = T5Tokenizer.from_pretrained(version)
         self.transformer = T5EncoderModel.from_pretrained(version)
         self.device = device
@@ -111,9 +121,10 @@ class FrozenCLIPEmbedder(AbstractEncoder):
         "pooled",
         "hidden"
     ]
-    def __init__(self, version="openai/clip-vit-large-patch14", device="cuda", max_length=77,
+    def __init__(self, version="openai/clip-vit-large-patch14", device=None, max_length=77,
                  freeze=True, layer="last", layer_idx=None):  # clip-vit-base-patch32
         super().__init__()
+        if device is None: device = _default_device()
         assert layer in self.LAYERS
         self.tokenizer = CLIPTokenizer.from_pretrained(version)
         self.transformer = CLIPTextModel.from_pretrained(version)
@@ -159,9 +170,10 @@ class FrozenOpenCLIPEmbedder(AbstractEncoder):
         "last",
         "penultimate"
     ]
-    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device="cuda", max_length=77,
+    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device=None, max_length=77,
                  freeze=True, layer="last"):
         super().__init__()
+        if device is None: device = _default_device()
         assert layer in self.LAYERS
         model, _, _ = open_clip.create_model_and_transforms(arch, device=torch.device('cpu'), pretrained=version)
         del model.visual
@@ -214,9 +226,10 @@ class FrozenOpenCLIPEmbedder(AbstractEncoder):
 
 
 class FrozenCLIPT5Encoder(AbstractEncoder):
-    def __init__(self, clip_version="openai/clip-vit-large-patch14", t5_version="google/t5-v1_1-xl", device="cuda",
+    def __init__(self, clip_version="openai/clip-vit-large-patch14", t5_version="google/t5-v1_1-xl", device=None,
                  clip_max_length=77, t5_max_length=77):
         super().__init__()
+        if device is None: device = _default_device()
         self.clip_encoder = FrozenCLIPEmbedder(clip_version, device, max_length=clip_max_length)
         self.t5_encoder = FrozenT5Embedder(t5_version, device, max_length=t5_max_length)
         print(f"{self.clip_encoder.__class__.__name__} has {count_params(self.clip_encoder)*1.e-6:.2f} M parameters, "
@@ -236,8 +249,9 @@ class FrozenOpenCLIPImageEncoder(AbstractEncoder):
     Uses the OpenCLIP transformer encoder for image
     """
 
-    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device="cuda", freeze=True):
+    def __init__(self, arch="ViT-H-14", version="laion2b_s32b_b79k", device=None, freeze=True):
         super().__init__()
+        if device is None: device = _default_device()
         model, _, preprocess= open_clip.create_model_and_transforms(arch, device=torch.device('cpu'), pretrained=version)
         del model.transformer
         self.model = model
@@ -280,10 +294,17 @@ class FrozenDinoV2Encoder(AbstractEncoder):
     """
     Uses the DINOv2 encoder for image
     """
-    def __init__(self, device="cuda", freeze=True):
+    def __init__(self, device=None, freeze=True):
         super().__init__()
-        dinov2 = hubconf.dinov2_vitg14() 
-        state_dict = torch.load(DINOv2_weight_path)
+        if device is None:
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+        dinov2 = hubconf.dinov2_vitg14()
+        state_dict = torch.load(DINOv2_weight_path, map_location=device)
         dinov2.load_state_dict(state_dict, strict=False)
         self.model = dinov2.to(device)
         self.device = device

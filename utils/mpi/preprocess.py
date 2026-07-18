@@ -8,9 +8,17 @@ import sys
 sys.path.append(".")
 from utils.mpi.get_depth import get_depth_map
 
-depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf")
+if torch.cuda.is_available():
+    _device = 0
+elif torch.backends.mps.is_available():
+    _device = "mps"
+else:
+    _device = "cpu"
 
-sam_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device=0)
+depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf", device="cpu")
+
+sam_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device="cpu",
+                     torch_dtype=torch.float32)
 
 def get_ddim_inverted_latents(nt_pipeline, image, prompt, num_inference_steps=50):
     latent = nt_pipeline.image2latent(image)
@@ -33,6 +41,8 @@ def get_depth_and_sam_mask(image, is_relative_depth=True):
     else:
         actual_depth, visualise_depth = get_depth_map(image)
         depth = (actual_depth, visualise_depth)
+    # ensure image is a plain PIL RGB image (no MPS tensors attached)
+    image = Image.fromarray(np.array(image).astype(np.uint8))
     outputs = sam_model(image, points_per_batch=64)
     masks = outputs["masks"]
     final_mask = torch.zeros_like(torch.tensor(masks[0]))

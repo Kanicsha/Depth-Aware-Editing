@@ -19,8 +19,9 @@ class DPMSolverSampler(object):
 
     def register_buffer(self, name, attr):
         if type(attr) == torch.Tensor:
-            if attr.device != torch.device("cuda"):
-                attr = attr.to(torch.device("cuda"))
+            if attr.is_floating_point() and self.model.device.type == "mps":
+                attr = attr.to(torch.float32)
+            attr = attr.to(self.model.device)
         setattr(self, name, attr)
 
     @torch.no_grad()

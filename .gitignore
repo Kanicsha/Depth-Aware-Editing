@@ -148,3 +148,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Mac setup: large weight files
+weights/*.pt
+weights/*.ckpt
+weights/*.pth

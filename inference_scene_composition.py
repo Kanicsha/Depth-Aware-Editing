@@ -18,7 +18,12 @@ from src.featglac.get_depth import get_depth_map
 from transformers import pipeline
 
 config_path = "./src/featglac/config/default_sc.yaml"
-device = torch.device("cuda")
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 diff_handles_config = OmegaConf.load(config_path) if config_path is not None else None
 diff_handles = FeatureGuidance(conf=diff_handles_config)
 diff_handles.to(device)
@@ -72,17 +77,17 @@ depth_control = depth_fore * fg_mask[:,:,0] + depth_back * (1 - fg_mask[:,:,0])
 depth_control_img = depth_control.copy()
 depth_control_col = colorise_depth(depth_control)
 cv2.imwrite("./{}/{}_depth_control.jpg".format(save_dir,input_img_name), depth_control_col)
-depth_control = torch.from_numpy(depth_control).unsqueeze(0).unsqueeze(0).to(torch.float32).to("cuda")
+depth_control = torch.from_numpy(depth_control).unsqueeze(0).unsqueeze(0).to(torch.float32).to(device)
 
 image_mpi = np.array(bg_img) * (1 - fg_mask) + np.array(fg_img) * fg_mask
 cv2.imwrite("./{}/{}_image_mpi.jpg".format(save_dir,input_img_name), cv2.cvtColor(image_mpi, cv2.COLOR_RGB2BGR))
 
-depth_back = torch.tensor(depth_back).unsqueeze(0).unsqueeze(0).to("cuda")
-ten_img2 = torch.tensor(np.array(bg_img)).permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
+depth_back = torch.tensor(depth_back).unsqueeze(0).unsqueeze(0).to(device)
+ten_img2 = torch.tensor(np.array(bg_img)).permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
 
 if(os.path.exists(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_null_text.pt")):
-    null_text_emb = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_null_text.pt").to("cuda")
-    init_noise = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_init_noise.pt").to("cuda")
+    null_text_emb = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_null_text.pt").to(device)
+    init_noise = torch.load(f"{null_text_emb_path}/{bg_name}_{inv_prompt_bg}_init_noise.pt").to(device)
 else:
     null_text_emb, init_noise = diff_handles.invert_input_image(ten_img2, depth_back, inv_prompt_bg)
     init_noise = init_noise[-1]
@@ -101,11 +106,11 @@ with torch.no_grad():
     latent_image = (latent_image * 255).astype(np.uint8)
     cv2.imwrite("./{}/{}_recon_bg.jpg".format(save_dir,input_img_name), cv2.cvtColor(latent_image, cv2.COLOR_RGB2BGR))
 
-depth_fore = torch.tensor(depth_fore).unsqueeze(0).unsqueeze(0).to("cuda")
-ten_img3 = torch.tensor(np.array(fg_img)).permute(2, 0, 1).unsqueeze(0).to("cuda") / 255.0
+depth_fore = torch.tensor(depth_fore).unsqueeze(0).unsqueeze(0).to(device)
+ten_img3 = torch.tensor(np.array(fg_img)).permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
 if(os.path.exists(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_null_text.pt")):
-    null_text_emb = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_null_text.pt").to("cuda")
-    init_noise = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_init_noise.pt").to("cuda")
+    null_text_emb = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_null_text.pt").to(device)
+    init_noise = torch.load(f"{null_text_emb_path}/{input_img_name}_{inv_prompt_fg}_init_noise.pt").to(device)
 else:
     null_text_emb, init_noise = diff_handles.invert_input_image(ten_img3, depth_fore, inv_prompt_fg)
     init_noise = init_noise[-1]
@@ -115,7 +120,7 @@ else:
 null_text_emb_fg, init_noise_fg, activations_fore, latent_image = diff_handles.generate_input_image(
                 depth=depth_fore, prompt=inv_prompt_fg, null_text_emb=null_text_emb, init_noise=init_noise)
 
-down_sampled_mask = torch.nn.functional.interpolate(torch.tensor(fg_mask[:,:,0]).unsqueeze(0).unsqueeze(0).to(torch.float32).to("cuda"),
+down_sampled_mask = torch.nn.functional.interpolate(torch.tensor(fg_mask[:,:,0]).unsqueeze(0).unsqueeze(0).to(torch.float32).to(device),
                                                      size=(64, 64), mode='nearest')
 
 # save image reconstructed from inversion

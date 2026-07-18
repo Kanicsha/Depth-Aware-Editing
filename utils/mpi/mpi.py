@@ -45,13 +45,14 @@ def render_scene_from_mpi_torch(mpi_rgbs, mpi_alphas):
     n_planes = len(mpi_alphas)
 
     # Creating a list of accumulated product values - prod(1-alpha)_i=1->i=D
-    cum_alpha_ar = [torch.ones(mpi_alphas[0].shape).cuda()] # The deepest layer or mpi, having all the values to be 1. 
+    _dev = mpi_alphas[0].device
+    cum_alpha_ar = [torch.ones(mpi_alphas[0].shape).to(_dev)]
     for idx in range(0,n_planes):
-        cum_alpha = cum_alpha_ar[-1]*(1-mpi_alphas[n_planes-1-idx]) 
-        cum_alpha_ar.append(cum_alpha) 
+        cum_alpha = cum_alpha_ar[-1]*(1-mpi_alphas[n_planes-1-idx])
+        cum_alpha_ar.append(cum_alpha)
 
-    # To accumulate the pixel values in the combined image 
-    combined_img = torch.zeros(mpi_rgbs[0].shape).cuda()
+    # To accumulate the pixel values in the combined image
+    combined_img = torch.zeros(mpi_rgbs[0].shape).to(_dev)
     for idx in range(0, n_planes):
         rgb = mpi_rgbs[idx]
         alpha = mpi_alphas[idx] 
