@@ -234,8 +234,7 @@ def gradio_infer(background_image, reference_image, depth_value, image_dict, inv
     ref_np = np.array(reference_image.convert("RGBA"))
     
     # Extract RGB and mask from reference
-    ref_image = ref_np[:, :, :3]  # RGB channels
-    ref_image = cv2.cvtColor(ref_image, cv2.COLOR_BGR2RGB)
+    ref_image = ref_np[:, :, :3]  # already RGB (PIL)
     ref_mask = ref_np[:, :, 3]    # Alpha channel
     ref_mask = (ref_mask > 128).astype(np.uint8) * 255
     

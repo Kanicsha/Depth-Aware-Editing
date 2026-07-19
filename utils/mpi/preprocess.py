@@ -15,9 +15,24 @@ elif torch.backends.mps.is_available():
 else:
     _device = "cpu"
 
-depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf", device="cpu")
+if _device == "mps":
+    # facebook/sam-vit-huge's mask-generation pipeline builds its point-grid
+    # as float64, which MPS cannot hold at all (unlike float16/bf16, this
+    # isn't a precision tradeoff, it's a hard unsupported-dtype error).
+    # Downcast any float64 tensor to float32 right before it's moved to MPS.
+    from transformers.pipelines.base import Pipeline as _HFPipeline
+    _orig_ensure_tensor_on_device = _HFPipeline._ensure_tensor_on_device
 
-sam_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device="cpu",
+    def _ensure_tensor_on_device_mps_safe(self, inputs, device):
+        if torch.is_tensor(inputs) and inputs.dtype == torch.float64:
+            inputs = inputs.to(torch.float32)
+        return _orig_ensure_tensor_on_device(self, inputs, device)
+
+    _HFPipeline._ensure_tensor_on_device = _ensure_tensor_on_device_mps_safe
+
+depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf", device=_device)
+
+sam_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device=_device,
                      torch_dtype=torch.float32)
 
 def get_ddim_inverted_latents(nt_pipeline, image, prompt, num_inference_steps=50):

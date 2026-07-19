@@ -79,7 +79,7 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False)
     ref_box_yyxx = get_bbox_from_mask(ref_mask)
 
     # ref filter mask 
-    ref_mask_3 = np.stack([ref_mask,ref_mask,ref_mask],-1)
+    ref_mask_3 = (np.stack([ref_mask,ref_mask,ref_mask],-1) > 0).astype(ref_image.dtype)
     masked_ref_image = ref_image * ref_mask_3 + np.ones_like(ref_image) * 255 * (1-ref_mask_3)
 
     y1,y2,x1,x2 = ref_box_yyxx
@@ -89,7 +89,7 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False)
 
     ratio = np.random.randint(11, 12) / 10
     masked_ref_image, ref_mask = expand_image_mask(masked_ref_image, ref_mask, ratio=ratio)
-    ref_mask_3 = np.stack([ref_mask,ref_mask,ref_mask],-1)
+    ref_mask_3 = (np.stack([ref_mask,ref_mask,ref_mask],-1) > 0).astype(ref_image.dtype)
     # cv2.imwrite("masked_ref_image_expand.png", masked_ref_image)
 
     ### added
@@ -110,7 +110,8 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False)
     masked_ref_image_aug = masked_ref_image #aug_data(masked_ref_image) 
 
     ## cahnegd
-    masked_ref_image_compose, ref_mask_compose = masked_ref_img_for_collage, ref_mask_for_collage * 255 #aug_data_mask(masked_ref_image, ref_mask) 
+    masked_ref_image_compose = masked_ref_img_for_collage
+    ref_mask_compose = (ref_mask_for_collage > 0).astype(np.uint8) * 255
     ref_mask_3 = np.stack([ref_mask_compose,ref_mask_compose,ref_mask_compose],-1)
     ref_image_collage = sobel(masked_ref_image_compose, ref_mask_compose/255)
 
