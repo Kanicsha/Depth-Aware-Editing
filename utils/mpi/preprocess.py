@@ -1,4 +1,5 @@
 import os
+import threading
 import numpy as np
 import cv2
 from transformers import pipeline, SamModel, SamProcessor
@@ -30,10 +31,38 @@ if _device == "mps":
 
     _HFPipeline._ensure_tensor_on_device = _ensure_tensor_on_device_mps_safe
 
-depth_pipe = pipeline(task="depth-estimation", model="LiheYoung/depth-anything-small-hf", device=_device)
+_preprocess_lock = threading.Lock()
+_preprocess_loaded = False
+depth_pipe = None
+sam_model = None
 
-sam_model = pipeline("mask-generation", model="facebook/sam-vit-huge", device=_device,
-                     torch_dtype=torch.float32)
+
+def ensure_preprocess_models() -> None:
+    """Load depth + SAM pipelines on first Analyze/Generate (not at import)."""
+    global depth_pipe, sam_model, _preprocess_loaded
+
+    with _preprocess_lock:
+        if _preprocess_loaded:
+            return
+
+        print("[lazy-load] Loading depth-anything-small-hf + sam-vit-huge...", flush=True)
+        depth_pipe = pipeline(
+            task="depth-estimation",
+            model="LiheYoung/depth-anything-small-hf",
+            device=_device,
+        )
+        sam_model = pipeline(
+            "mask-generation",
+            model="facebook/sam-vit-huge",
+            device=_device,
+            torch_dtype=torch.float32,
+        )
+        _preprocess_loaded = True
+        print(
+            "[model-cache] depth-anything-small-hf + sam-vit-huge loaded in RAM "
+            "(reuse for all images this session).",
+            flush=True,
+        )
 
 def get_ddim_inverted_latents(nt_pipeline, image, prompt, num_inference_steps=50):
     latent = nt_pipeline.image2latent(image)
@@ -51,6 +80,7 @@ def get_null_text_latents(nt_pipeline, image, prompt, num_inference_steps=50, nu
     return null_text_latents
 
 def get_depth_and_sam_mask(image, is_relative_depth=True):
+    ensure_preprocess_models()
     if(is_relative_depth):
         depth = depth_pipe(image)["depth"]
     else:
@@ -158,7 +188,6 @@ def plot_depth_bins(depth, sam_mask, mask_image, input_img_name, save_dir, is_cr
         # ax.scatter(bin[1], bin[0], -1 * depth[bin], c=colors[np.random.randint(0, len(colors))])
     # plt.xlim(0, 1024)
     # plt.ylim(0, 1024)
-    plt.show()
     if(is_crop):
         plt.savefig("{}/{}_depth_bins_crop.png".format(save_dir,input_img_name))
     else:
@@ -175,7 +204,6 @@ def plot_depth_bins(depth, sam_mask, mask_image, input_img_name, save_dir, is_cr
         ax.scatter(bin["pc"][1], 800 - bin["pc"][0], c=bin["color"])
     # plt.xlim(0, 1024)
     # plt.ylim(0, 1024)
-    plt.show()
     if(is_crop):
         plt.savefig("{}/{}_depth_bins_front_crop.png".format(save_dir,input_img_name))
     else:

@@ -151,6 +151,9 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False)
     if(shape_control):
         collage_mask = np.stack([cropped_tar_mask,cropped_tar_mask,cropped_tar_mask],-1)
 
+    ref_alpha_crop = np.zeros((collage.shape[0], collage.shape[1]), dtype=np.uint8)
+    ref_alpha_crop[y1:y2, x1:x2] = (ref_mask_compose * 255).astype(np.uint8)
+
     # the size before pad
     H1, W1 = collage.shape[0], collage.shape[1]
     cropped_target_image = pad_to_square(cropped_target_image, pad_value = 0, random = False).astype(np.uint8)
@@ -174,7 +177,8 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False)
     collage = np.concatenate([collage, collage_mask[:,:,:1]  ] , -1)
 
     item = dict(ref=masked_ref_image_aug.copy(), jpg=cropped_target_image.copy(), hint=collage.copy(), extra_sizes=np.array([H1, W1, H2, W2]), 
-                tar_box_yyxx_crop=np.array( tar_box_yyxx_crop), tar_mpi_mask = tar_mask_mpi_cropped, object_bbox_for_sam = np.array(tar_box_yyxx)) 
+                tar_box_yyxx_crop=np.array( tar_box_yyxx_crop), tar_mpi_mask = tar_mask_mpi_cropped, object_bbox_for_sam = np.array(tar_box_yyxx),
+                ref_alpha_crop=ref_alpha_crop.copy())
     return item
 
 
@@ -207,7 +211,8 @@ def del_model_and_sampler(model, ddim_sampler):
     torch.cuda.empty_cache()
 
 def inference_single_image(ref_image, ref_mask, tar_image, tar_mask, mpi_data_dict, item=None, sam_postprocess_dict=None, guidance_scale = 5.0,
-                           curr_save_dir=None, save_memory=False, ddim_sampler=None, model=None):
+                           curr_save_dir=None, save_memory=False, ddim_sampler=None, model=None, use_full_pred=False,
+                           ddim_steps=None):
     if item is None:
         item = process_pairs(ref_image, ref_mask, tar_image, tar_mask)
     ref = item['ref'] * 255
@@ -256,7 +261,8 @@ def inference_single_image(ref_image, ref_mask, tar_image, tar_mask, mpi_data_di
     strength = 1  #gr.Slider(label="Control Strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
     guess_mode = False #gr.Checkbox(label='Guess Mode', value=False)
     #detect_resolution = 512  #gr.Slider(label="Segmentation Resolution", minimum=128, maximum=1024, value=512, step=1)
-    ddim_steps = 50 #gr.Slider(label="Steps", minimum=1, maximum=100, value=20, step=1)
+    if ddim_steps is None:
+        ddim_steps = 50
     scale = guidance_scale  #gr.Slider(label="Guidance Scale", minimum=0.1, maximum=30.0, value=9.0, step=0.1)
     seed = -1  #gr.Slider(label="Seed", minimum=-1, maximum=2147483647, step=1, randomize=True)
     eta = 0.0 #gr.Number(label="eta (DDIM)", value=0.0)
@@ -288,7 +294,7 @@ def inference_single_image(ref_image, ref_mask, tar_image, tar_mask, mpi_data_di
     orig_pred = pred.copy()
 
     ## saving ours anydoor results
-    pred_anydoor = orig_pred[1:,:,:]
+    pred_anydoor = orig_pred if use_full_pred else orig_pred[1:, :, :]
     
     sizes = item['extra_sizes']
     tar_box_yyxx_crop = item['tar_box_yyxx_crop'] 
@@ -451,16 +457,26 @@ if __name__ == '__main__':
         ten_img3 = torch.from_numpy(np.array(Image.fromarray(gt_image_cropped))).float().permute(2, 0, 1).unsqueeze(0).to(device) / 255.0
         depth_fore = torch.tensor(np.array(depth)).unsqueeze(0).unsqueeze(0).to(device)
 
-        if(os.path.exists(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt") and not do_null_text_again):
-            null_text_emb = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt").to(device)
-            ddim_latents = torch.load(f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt").to(device)
+        from utils.mpi.null_text_config import (
+            null_text_cache_paths,
+            null_text_disk_cache_enabled,
+        )
+
+        gt_crop_rgb = np.array(Image.fromarray(gt_image_cropped))
+        nt_path, in_path = null_text_cache_paths(
+            null_text_emb_path, gt_crop_rgb, depth_value, inv_prompt
+        )
+        if null_text_disk_cache_enabled() and os.path.exists(nt_path) and os.path.exists(in_path) and not do_null_text_again:
+            null_text_emb = torch.load(nt_path, map_location=device)
+            ddim_latents = torch.load(in_path, map_location=device)
             init_noise = ddim_latents[-1]
         else:
             null_text_emb, ddim_latents = diff_handles.invert_input_image(ten_img3, depth_fore, prompt=inv_prompt)
             init_noise = ddim_latents[-1]
-            torch.save(null_text_emb.detach().cpu(), f"{null_text_emb_path}/{image_name}_{inv_prompt}_null_text.pt")
-            ddim_latent = [latent.detach().cpu().numpy().tolist() for latent in ddim_latents]
-            torch.save(torch.tensor(ddim_latent), f"{null_text_emb_path}/{image_name}_{inv_prompt}_init_noise.pt")
+            if null_text_disk_cache_enabled():
+                torch.save(null_text_emb.detach().cpu(), nt_path)
+                ddim_latent = [latent.detach().cpu().numpy().tolist() for latent in ddim_latents]
+                torch.save(torch.tensor(ddim_latent), in_path)
 
         null_text_emb_fg, init_noise_fg, activations_fore, latent_image = diff_handles.generate_input_image(
                         depth=depth_fore, prompt=inv_prompt, null_text_emb=null_text_emb, init_noise=init_noise)

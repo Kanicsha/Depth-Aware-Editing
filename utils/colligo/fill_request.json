@@ -1,0 +1,20 @@
+{
+  "seeds": [1],
+  "size": { "width": 2048, "height": 2048 },
+  "output": {
+    "cai": { "directive": "sign_for_policy_mandate" },
+    "storeInputs": false,
+    "blendingMask": false
+  },
+  "modelVersion": "image3",
+  "detailLevel": "full",
+  "similarity": 2,
+  "inputImage": {
+    "source": { "name": "source" },
+    "fillArea": {
+      "fillMask": { "name": "mask" },
+      "invertMask": false
+    }
+  },
+  "useLegacyMd": false
+}

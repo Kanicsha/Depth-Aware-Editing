@@ -99,6 +99,41 @@ def extract_into_tensor(a, t, x_shape):
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 
+def _checkpoint_autocast_state():
+    state = {
+        "enabled": torch.is_autocast_enabled(),
+        "cache_enabled": torch.is_autocast_cache_enabled(),
+    }
+    if torch.cuda.is_available():
+        state["device_type"] = "cuda"
+        state["dtype"] = (
+            torch.get_autocast_dtype("cuda")
+            if hasattr(torch, "get_autocast_dtype")
+            else torch.get_autocast_gpu_dtype()
+        )
+    elif torch.backends.mps.is_available():
+        state["device_type"] = "mps"
+        state["dtype"] = (
+            torch.get_autocast_dtype("mps")
+            if hasattr(torch, "get_autocast_dtype")
+            else torch.float16
+        )
+    else:
+        state["device_type"] = "cpu"
+        state["dtype"] = torch.float32
+    return state
+
+
+def _checkpoint_autocast(state):
+    device_type = state["device_type"]
+    return torch.amp.autocast(
+        device_type,
+        enabled=state["enabled"],
+        dtype=state.get("dtype"),
+        cache_enabled=state["cache_enabled"],
+    )
+
+
 def checkpoint(func, inputs, params, flag):
     """
     Evaluate a function without caching intermediate activations, allowing for
@@ -122,9 +157,7 @@ class CheckpointFunction(torch.autograd.Function):
         ctx.run_function = run_function
         ctx.input_tensors = list(args[:length])
         ctx.input_params = list(args[length:])
-        ctx.gpu_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
-                                   "dtype": torch.get_autocast_gpu_dtype(),
-                                   "cache_enabled": torch.is_autocast_cache_enabled()}
+        ctx.gpu_autocast_kwargs = _checkpoint_autocast_state()
         with torch.no_grad():
             output_tensors = ctx.run_function(*ctx.input_tensors)
         return output_tensors
@@ -132,8 +165,7 @@ class CheckpointFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *output_grads):
         ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
-        with torch.enable_grad(), \
-                torch.cuda.amp.autocast(**ctx.gpu_autocast_kwargs):
+        with torch.enable_grad(), _checkpoint_autocast(ctx.gpu_autocast_kwargs):
             # Fixes a bug where the first op in run_function modifies the
             # Tensor storage in place, which is not allowed for detach()'d
             # Tensors.

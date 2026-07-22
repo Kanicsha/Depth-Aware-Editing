@@ -1,0 +1,6 @@
+{
+  "_comment": "Edit while Gradio is running; picked up on next Analyze/Generate (no restart).",
+  "similarity": 2,
+  "detailLevel": "full",
+  "modelVersion": "image3"
+}

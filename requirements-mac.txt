@@ -20,3 +20,4 @@ pillow
 pyyaml
 protobuf>=6.31.1,<8
 tensorboard==2.14.0
+requests

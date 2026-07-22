@@ -1,4 +1,6 @@
 import pathlib
+import threading
+from typing import Callable, List, Tuple, TypeVar
 
 import torch
 import scipy.ndimage
@@ -8,9 +10,37 @@ from src.featglac.stable_null_inverter import StableNullInverter
 from src.featglac.guided_stable_diffuser import GuidedStableDiffuser
 # from src.diffhandles.depth_transform import transform_depth, normalize_depth
 from src.featglac.utils import solve_laplacian_depth
+from utils.mpi.null_text_config import null_text_ddim_steps, null_text_inner_steps
 
 import numpy as np
-from typing import List, Tuple
+
+T = TypeVar("T")
+
+
+def _run_with_autograd(fn: Callable[[], T]) -> T:
+    """
+    Run code that needs autograd outside Gradio's thread-local inference_mode.
+
+    Gradio 3.x wraps UI callbacks in ``torch.inference_mode()``, which breaks
+    null-text optimization (``loss.backward()``). Autograd is thread-local, so
+    a worker thread is enough to escape that context.
+    """
+    result: dict[str, T] = {}
+    error: dict[str, BaseException] = {}
+
+    def _target() -> None:
+        torch.set_grad_enabled(True)
+        try:
+            result["value"] = fn()
+        except BaseException as exc:
+            error["exc"] = exc
+
+    worker = threading.Thread(target=_target, name="null-text-inversion")
+    worker.start()
+    worker.join()
+    if "exc" in error:
+        raise error["exc"]
+    return result["value"]
 
 class FeatureGuidance:
 
@@ -22,7 +52,7 @@ class FeatureGuidance:
         self.conf = conf
 
         self.diffuser = GuidedStableDiffuser(conf=self.conf.guided_diffuser)
-        self.inverter = StableNullInverter(self.diffuser)
+        self.inverter = StableNullInverter(self.diffuser, num_ddim_steps=null_text_ddim_steps())
 
         self.device = torch.device('cuda')
 
@@ -52,9 +82,16 @@ class FeatureGuidance:
         # disparity = normalize_depth(1.0/(depth + 1e-6))
         disparity = (1.0/(depth + 1e-6))
 
-        # invert image to get noise and null text that can be used to reproduce the image
-        _, init_noise, null_text_emb = self.inverter.invert(
-            target_img=img, depth=disparity, prompt=prompt, num_inner_steps=5, verbose=True)
+        def _invert():
+            return self.inverter.invert(
+                target_img=img,
+                depth=disparity,
+                prompt=prompt,
+                num_inner_steps=null_text_inner_steps(),
+                verbose=True,
+            )
+
+        _, init_noise, null_text_emb = _run_with_autograd(_invert)
 
         return null_text_emb, init_noise
 

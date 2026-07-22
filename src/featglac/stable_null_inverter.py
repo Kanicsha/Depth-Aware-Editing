@@ -133,6 +133,16 @@ class StableNullInverter(NullInverter):
         return image_rec, ddim_latents
 
     def null_optimization(self, latents, context, depth, num_inner_steps, epsilon):
+        grad_was_enabled = torch.is_grad_enabled()
+        torch.set_grad_enabled(True)
+        try:
+            return self._null_optimization_impl(
+                latents, context, depth, num_inner_steps, epsilon
+            )
+        finally:
+            torch.set_grad_enabled(grad_was_enabled)
+
+    def _null_optimization_impl(self, latents, context, depth, num_inner_steps, epsilon):
         uncond_embeddings, cond_embeddings = context.chunk(2)
         uncond_embeddings_list = []
         latent_cur = latents[-1]

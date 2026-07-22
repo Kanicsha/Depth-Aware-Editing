@@ -7,6 +7,7 @@ VITON*/
 examples_old/
 results/
 sam_output_dir
+.model_cache/
 weights/
 examples/Gradio/null_embed*
 flagged*
