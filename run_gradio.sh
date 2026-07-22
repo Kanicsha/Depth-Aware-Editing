@@ -7,12 +7,14 @@
 #   same_and_behind_intersection   — C3: (SAME ∪ BEHIND) ∩ bbox → GenFill
 #   behind_intersection            — E2: BEHIND ∩ bbox only → GenFill
 #   f3                             — F3: SAME → GenFill; AnyDoor hint excludes BEHIND
+#   occlusion                      — no GenFill; AnyDoor ref_alpha only; BEHIND holes (see run_occlusion.sh)
 #   none                           — skip GenFill (composite still runs)
 #
 # Examples:
 #   GENFILL_MODE=c3 ./run_gradio.sh
 #   GENFILL_MODE=e2 ./run_gradio.sh
 #   GENFILL_MODE=f3 ./run_gradio.sh
+#   ./run_occlusion.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"

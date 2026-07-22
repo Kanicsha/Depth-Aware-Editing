@@ -33,9 +33,10 @@ from run_inference_object_placement import process_pairs, crop_back, inference_s
 from utils.colligo.fill_client import run_colligo_fill
 from utils.lazy_models import ensure_generation_models, ensure_preprocess_models, get_device
 from utils.mpi.removal_mask import (
-    anydoor_edit_mask,
-    anydoor_hint_excludes_behind,
+    anydoor_uses_custom_hint,
+    build_anydoor_edit_mask,
     genfill_mode,
+    is_occlusion_placement_mode,
     patch_image_dict_anydoor_hint,
     resolve_genfill_removal_mask,
     sam_layered_removal_masks,
@@ -687,8 +688,10 @@ def gradio_infer(
         # "object_latents": None
     }
 
-    if anydoor_hint_excludes_behind(genfill_mode()):
-        edit_mask = anydoor_edit_mask(
+    placement_mode = genfill_mode()
+    if anydoor_uses_custom_hint(placement_mode):
+        edit_mask = build_anydoor_edit_mask(
+            placement_mode,
             image_dict,
             gt_image_cropped.shape[:2],
             behind_mask=behind_mask,
@@ -699,13 +702,21 @@ def gradio_infer(
             os.path.join(current_save_dir, "anydoor_edit_mask.png"),
             (np.clip(edit_mask, 0.0, 1.0) * 255).astype(np.uint8),
         )
+        hint_label = (
+            "occlusion ref_alpha only"
+            if is_occlusion_placement_mode(placement_mode)
+            else "F3 excludes BEHIND"
+        )
         print(
-            f"{_ts()} [anydoor] F3 hint excludes BEHIND — edit mask "
+            f"{_ts()} [anydoor] {hint_label} — edit mask "
             f"{int((edit_mask > 0).sum())} px",
             flush=True,
         )
         if run_logger is not None:
-            run_logger.set_manifest(anydoor_edit_mask_pixels=int((edit_mask > 0).sum()))
+            run_logger.set_manifest(
+                anydoor_edit_mask_pixels=int((edit_mask > 0).sum()),
+                anydoor_hint_mode=placement_mode,
+            )
     
     # Generate final image
     generated_images = []
@@ -737,6 +748,7 @@ def gradio_infer(
             behind_mask_crop=behind_mask,
             bg_clean_rgb=bg_clean,
             save_dir=current_save_dir,
+            placement_mode=placement_mode,
         )
         cv2.imwrite(
             os.path.join(current_save_dir, "gradio_generated_image.png"),

@@ -41,6 +41,9 @@ _GENFILL_MODE_ALIASES: dict[str, str] = {
     "f3": "f3",
     "same_intersection_exclude_behind_anydoor": "f3",
     "same_exclude_behind_anydoor": "f3",
+    "occlusion": "occlusion",
+    "occlusion_ref_alpha": "occlusion",
+    "ref_alpha_only": "occlusion",
     "none": "none",
 }
 
@@ -52,7 +55,19 @@ def genfill_mode() -> str:
 
 
 def anydoor_hint_excludes_behind(mode: str | None = None) -> bool:
-    return genfill_mode() if mode is None else mode == "f3"
+    m = genfill_mode() if mode is None else mode
+    return m == "f3"
+
+
+def is_occlusion_placement_mode(mode: str | None = None) -> bool:
+    if mode is None:
+        return genfill_mode() == "occlusion"
+    return _GENFILL_MODE_ALIASES.get(str(mode).strip().lower(), mode) == "occlusion"
+
+
+def anydoor_uses_custom_hint(mode: str | None = None) -> bool:
+    m = genfill_mode() if mode is None else mode
+    return m in ("f3", "occlusion")
 
 
 def _dilate_removal_mask(mask: np.ndarray) -> np.ndarray:
@@ -90,11 +105,33 @@ def resolve_genfill_removal_mask(
     elif mode == "f3":
         removal = same_d
         meta["anydoor_hint_excludes_behind"] = True
+    elif mode == "occlusion":
+        removal = np.zeros(full_shape[:2], dtype=np.uint8)
+        meta["anydoor_hint_ref_alpha_only"] = True
+        meta["genfill_disabled"] = True
     else:  # same_intersection
         removal = same_d
 
     meta["genfill_removal_pixels"] = int((removal > 0).sum())
     return removal, meta
+
+
+def anydoor_ref_alpha_edit_mask(
+    image_dict: dict,
+    full_shape: tuple[int, int],
+    *,
+    ref_alpha_crop: np.ndarray | None = None,
+) -> np.ndarray:
+    """AnyDoor edit mask = reference alpha only (occlusion placement mode)."""
+    edit = np.zeros(full_shape[:2], dtype=np.float32)
+    if ref_alpha_crop is None:
+        return edit
+    alpha = ref_alpha_crop.astype(np.float32)
+    if float(alpha.max()) > 1.5:
+        alpha = alpha / 255.0
+    if alpha.shape[:2] != edit.shape[:2]:
+        alpha = cv2.resize(alpha, (edit.shape[1], edit.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return np.clip(alpha, 0.0, 1.0)
 
 
 def anydoor_edit_mask(
@@ -119,6 +156,29 @@ def anydoor_edit_mask(
             alpha = cv2.resize(alpha, (edit.shape[1], edit.shape[0]), interpolation=cv2.INTER_NEAREST)
         edit = np.clip(np.maximum(edit, alpha), 0.0, 1.0)
     return edit
+
+
+def build_anydoor_edit_mask(
+    mode: str,
+    image_dict: dict,
+    full_shape: tuple[int, int],
+    *,
+    behind_mask: np.ndarray,
+    ref_alpha_crop: np.ndarray | None = None,
+) -> np.ndarray:
+    """Build the AnyDoor hint alpha mask for F3 or occlusion modes."""
+    if mode == "occlusion":
+        return anydoor_ref_alpha_edit_mask(
+            image_dict, full_shape, ref_alpha_crop=ref_alpha_crop
+        )
+    if mode == "f3":
+        return anydoor_edit_mask(
+            image_dict,
+            full_shape,
+            behind_mask=behind_mask,
+            ref_alpha_crop=ref_alpha_crop,
+        )
+    raise ValueError(f"no custom AnyDoor hint for mode={mode!r}")
 
 
 def patch_image_dict_anydoor_hint(image_dict: dict, edit_mask: np.ndarray) -> dict:

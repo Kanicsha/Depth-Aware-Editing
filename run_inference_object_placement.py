@@ -74,6 +74,14 @@ def plot_intermediate(intermediates, save_path):
         
 
 def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False):
+    def _clip_box_to_image(box, height, width):
+        y1, y2, x1, x2 = (int(v) for v in box)
+        y1 = max(0, min(y1, height))
+        y2 = max(y1, min(y2, height))
+        x1 = max(0, min(x1, width))
+        x2 = max(x1, min(x2, width))
+        return y1, y2, x1, x2
+
     # ========= Reference ===========
     # ref expand 
     ref_box_yyxx = get_bbox_from_mask(ref_mask)
@@ -136,23 +144,30 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False)
     y1,y2,x1,x2 = tar_box_yyxx
     # cv2.imwrite("cropped_target_image.png", cropped_target_image)
 
+    collage = cropped_target_image.copy()
+    y1, y2, x1, x2 = _clip_box_to_image(tar_box_yyxx, collage.shape[0], collage.shape[1])
+    tw, th = x2 - x1, y2 - y1
+    if tw <= 0 or th <= 0:
+        raise ValueError(f"Invalid inner placement box after clipping: {(y1, y2, x1, x2)}")
+
     # collage
-    ref_image_collage = cv2.resize(ref_image_collage, (x2-x1, y2-y1))
-    ref_mask_compose = cv2.resize(ref_mask_compose.astype(np.uint8), (x2-x1, y2-y1))
+    ref_image_collage = cv2.resize(ref_image_collage, (tw, th))
+    ref_mask_compose = cv2.resize(ref_mask_compose.astype(np.uint8), (tw, th))
     ref_mask_compose = (ref_mask_compose > 128).astype(np.uint8)
     # cv2.imwrite("ref_image_collage.png", ref_image_collage)
 
-    collage = cropped_target_image.copy() 
-    collage[y1:y2,x1:x2,:] = ref_image_collage
+    collage[y1:y2, x1:x2, :] = ref_image_collage
 
     collage_mask = cropped_target_image.copy() * 0.0
-    collage_mask[y1:y2,x1:x2,:] = 1.0
+    collage_mask[y1:y2, x1:x2, :] = 1.0
 
     if(shape_control):
         collage_mask = np.stack([cropped_tar_mask,cropped_tar_mask,cropped_tar_mask],-1)
 
     ref_alpha_crop = np.zeros((collage.shape[0], collage.shape[1]), dtype=np.uint8)
     ref_alpha_crop[y1:y2, x1:x2] = (ref_mask_compose * 255).astype(np.uint8)
+
+    tar_box_yyxx = np.array([y1, y2, x1, x2], dtype=np.int32)
 
     # the size before pad
     H1, W1 = collage.shape[0], collage.shape[1]
@@ -177,7 +192,7 @@ def process_pairs(ref_image, ref_mask, tar_image, tar_mask, shape_control=False)
     collage = np.concatenate([collage, collage_mask[:,:,:1]  ] , -1)
 
     item = dict(ref=masked_ref_image_aug.copy(), jpg=cropped_target_image.copy(), hint=collage.copy(), extra_sizes=np.array([H1, W1, H2, W2]), 
-                tar_box_yyxx_crop=np.array( tar_box_yyxx_crop), tar_mpi_mask = tar_mask_mpi_cropped, object_bbox_for_sam = np.array(tar_box_yyxx),
+                tar_box_yyxx_crop=np.array( tar_box_yyxx_crop), tar_mpi_mask = tar_mask_mpi_cropped, object_bbox_for_sam = tar_box_yyxx,
                 ref_alpha_crop=ref_alpha_crop.copy())
     return item
 

@@ -136,16 +136,23 @@ def occlusion_aware_composite(
     behind_mask_crop: np.ndarray | None = None,
     bg_clean_rgb: np.ndarray | None = None,
     save_dir: str | None = None,
+    placement_mode: str | None = None,
 ) -> np.ndarray:
     """Alpha-composite AnyDoor object; restore BEHIND through holes and FRONT on top."""
+    from utils.mpi.removal_mask import is_occlusion_placement_mode
+
     full_shape = original_bg_rgb.shape[:2]
     placement_mask_full = placement_mask_from_image_dict(image_dict, full_shape)
     removal = removal_mask_crop if removal_mask_crop is not None else np.zeros(full_shape, dtype=np.uint8)
     front = front_mask_crop if front_mask_crop is not None else np.zeros(full_shape, dtype=np.uint8)
     behind = behind_mask_crop if behind_mask_crop is not None else np.zeros(full_shape, dtype=np.uint8)
     touched = touched_region_full(image_dict, full_shape, removal, front)
+    occlusion_mode = is_occlusion_placement_mode(placement_mode)
 
-    layer0 = (bg_clean_rgb if bg_clean_rgb is not None else bg_working_rgb).astype(np.float32)
+    if occlusion_mode:
+        layer0 = original_bg_rgb.astype(np.float32)
+    else:
+        layer0 = (bg_clean_rgb if bg_clean_rgb is not None else bg_working_rgb).astype(np.float32)
     alpha_obj = placement_alpha_full(
         image_dict,
         full_shape,

@@ -4,8 +4,11 @@ import os
 import numpy as np
 from utils.mpi.removal_mask import (
     anydoor_edit_mask,
+    anydoor_ref_alpha_edit_mask,
+    build_anydoor_edit_mask,
     full_bbox_removal_mask,
     genfill_mode,
+    is_occlusion_placement_mode,
     patch_image_dict_anydoor_hint,
     resolve_genfill_removal_mask,
     sam_intersection_removal_mask,
@@ -216,3 +219,39 @@ def test_resolve_f3_same_only_and_anydoor_hint_patch():
     patched = patch_image_dict_anydoor_hint(image_dict, edit)
     assert patched["hint"][150, 150, -1] == 0
     assert patched["hint"][100, 100, -1] > 0
+
+
+def test_resolve_occlusion_skips_genfill_and_uses_ref_alpha_hint():
+    image_dict, same, front, behind, _ = _layered_fixture()
+    removal, meta = resolve_genfill_removal_mask(
+        "occlusion",
+        image_dict,
+        (512, 512),
+        same,
+        behind,
+        front,
+    )
+    assert meta["genfill_disabled"] is True
+    assert meta["anydoor_hint_ref_alpha_only"] is True
+    assert int((removal > 0).sum()) == 0
+
+    ref_alpha = np.zeros((512, 512), dtype=np.uint8)
+    ref_alpha[200:400, 220:320] = 255
+    image_dict = {**image_dict, "ref_alpha_crop": ref_alpha}
+    edit = build_anydoor_edit_mask(
+        "occlusion",
+        image_dict,
+        (512, 512),
+        behind_mask=behind,
+        ref_alpha_crop=ref_alpha,
+    )
+    f3_edit = build_anydoor_edit_mask(
+        "f3",
+        image_dict,
+        (512, 512),
+        behind_mask=behind,
+        ref_alpha_crop=ref_alpha,
+    )
+    assert int((edit > 0).sum()) < int((f3_edit > 0).sum())
+    assert is_occlusion_placement_mode("occlusion")
+    assert is_occlusion_placement_mode("ref_alpha_only")
